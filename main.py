@@ -3,6 +3,39 @@ import math
 import config
 import keys
 
+test_graph = {
+    'A': {
+        'B': {'weight': -math.log(1.2), 'type': 'bid', 'quantity': 100},
+        'C': {'weight': -math.log(0.9), 'type': 'ask', 'quantity': 100},
+        'D': {'weight': -math.log(0.95), 'type': 'ask', 'quantity': 100},
+        'E': {'weight': -math.log(0.98), 'type': 'ask', 'quantity': 100},
+    },
+    'B': {
+        'A': {'weight': -math.log(0.83), 'type': 'ask', 'quantity': 100},
+        'C': {'weight': -math.log(1.1), 'type': 'bid', 'quantity': 100},
+        'D': {'weight': -math.log(1.05), 'type': 'bid', 'quantity': 100},
+        'E': {'weight': -math.log(1.02), 'type': 'bid', 'quantity': 100},
+    },
+    'C': {
+        'A': {'weight': -math.log(1.1), 'type': 'bid', 'quantity': 100},
+        'B': {'weight': -math.log(0.9), 'type': 'ask', 'quantity': 100},
+        'D': {'weight': -math.log(0.96), 'type': 'ask', 'quantity': 100},
+        'E': {'weight': -math.log(0.99), 'type': 'ask', 'quantity': 100},
+    },
+    'D': {
+        'A': {'weight': -math.log(1.05), 'type': 'bid', 'quantity': 100},
+        'B': {'weight': -math.log(0.95), 'type': 'ask', 'quantity': 100},
+        'C': {'weight': -math.log(1.04), 'type': 'bid', 'quantity': 100},
+        'E': {'weight': -math.log(1.03), 'type': 'bid', 'quantity': 100},
+    },
+    'E': {
+        'A': {'weight': -math.log(1.02), 'type': 'bid', 'quantity': 100},
+        'B': {'weight': -math.log(0.98), 'type': 'ask', 'quantity': 100},
+        'C': {'weight': -math.log(1.01), 'type': 'bid', 'quantity': 100},
+        'D': {'weight': -math.log(0.97), 'type': 'ask', 'quantity': 100},
+    },
+}
+
 def get_exchange_id():
     exchange_id = input('Enter exchange id: ')
     while exchange_id not in ccxt.exchanges:
@@ -32,6 +65,46 @@ def build_graph(graph, tickers):
                 'type': 'ask',
                 'quantity': ticker['askVolume'],
             }
+
+def find_arbitrage(graph, begin):
+    """Takes a graph of exchange rates and a starting currency, and finds arbitrage opportunities (negative cycles) beginning with begin using Bellman-Ford algorithm."""
+    if begin not in graph:
+        print('Invalid currency for Bellman-Ford: ' + begin + '!')
+        return
+    
+    distances = {}
+    predecessors = {}
+    negative_cycles = []
+
+    for currency in graph:
+        distances[currency] = math.inf
+        predecessors[currency] = None
+    distances[begin] = 0
+
+    for i in range(len(graph) - 1):
+        for currency in graph:
+            for neighbor in graph[currency]:
+                if distances[currency] + graph[currency][neighbor]['weight'] < distances[neighbor]:
+                    distances[neighbor] = distances[currency] + graph[currency][neighbor]['weight']
+                    predecessors[neighbor] = currency
+
+    #for currency in graph:
+    currency = begin
+    for neighbor in graph[currency]:
+        if distances[currency] + graph[currency][neighbor]['weight'] < distances[neighbor]:
+            print('Negative cycle detected!')
+            negative_cycle = [neighbor]
+            currency_trace = currency
+            while currency_trace not in negative_cycle:
+                currency_trace = predecessors[currency_trace]
+                negative_cycle.append(currency_trace)
+            negative_cycle = [currency] + negative_cycle
+            negative_cycles.append(negative_cycle)
+            print('ARBITRAGE:', negative_cycle)
+            for i in range(len(negative_cycle)):
+                print(negative_cycle[i], '->', negative_cycle[(i + 1) % len(negative_cycle)], 'at transformed rate', graph[negative_cycle[i]][negative_cycle[(i + 1) % len(negative_cycle)]]['weight'])
+            print('Total rate:', math.exp(-sum([graph[negative_cycle[i]][negative_cycle[(i + 1) % len(negative_cycle)]]['weight'] for i in range(len(negative_cycle))])))
+    return negative_cycles or 'No arbitrage opportunities found.'
 
 #print(ccxt.exchanges) 
 print('Sandbox mode:', config.sandbox)
@@ -85,6 +158,16 @@ home_currency = config.home_currency
 home_balance = exchange.fetch_balance()[home_currency]
 
 print('Balance of', home_currency, ':', home_balance)
+
+
+#print(graph)
+print(find_arbitrage(graph, 'BTC'))
+
+# The arbitrage opportunity is A -> B -> C -> A
+# A -> B at a rate of 1.2 (sell A to buy B)
+# B -> C at a rate of 1.1 (sell B to buy C)
+# C -> A at a rate of 1.1 (sell C to buy A)
+# The total rate is 1.2 * 1.1 * 1.1 = 1.452, which is greater than 1, so there's an arbitrage opportunity.
 
 
 ### Pseudocode
