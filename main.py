@@ -2,6 +2,10 @@ import ccxt
 import math
 import config
 import keys
+import time
+import collections
+
+fee = 0.99
 
 test_graph = {
     'A': {
@@ -66,15 +70,14 @@ def build_graph(graph, tickers):
                 'quantity': ticker['askVolume'],
             }
 
-def find_arbitrage(graph, begin):
-    """Takes a graph of exchange rates and a starting currency, and finds arbitrage opportunities (negative cycles) beginning with begin using Bellman-Ford algorithm."""
+def find_arbitrage_cycle(graph, begin):
+    """Takes a graph of exchange rates and a starting currency, and finds an arbitrage opportunity (negative cycle) using Bellman-Ford algorithm. Begin should be a currency in the graph preferably connected to many other currencies. Returns as a deque containing an arbitrage cycle."""
     if begin not in graph:
         print('Invalid currency for Bellman-Ford: ' + begin + '!')
         return
     
     distances = {}
     predecessors = {}
-    negative_cycles = []
 
     for currency in graph:
         distances[currency] = math.inf
@@ -88,23 +91,50 @@ def find_arbitrage(graph, begin):
                     distances[neighbor] = distances[currency] + graph[currency][neighbor]['weight']
                     predecessors[neighbor] = currency
 
-    #for currency in graph:
-    currency = begin
-    for neighbor in graph[currency]:
-        if distances[currency] + graph[currency][neighbor]['weight'] < distances[neighbor]:
-            print('Negative cycle detected!')
-            negative_cycle = [neighbor]
-            currency_trace = currency
-            while currency_trace not in negative_cycle:
-                currency_trace = predecessors[currency_trace]
-                negative_cycle.append(currency_trace)
-            negative_cycle = [currency] + negative_cycle
-            negative_cycles.append(negative_cycle)
-            print('ARBITRAGE:', negative_cycle)
-            for i in range(len(negative_cycle)):
-                print(negative_cycle[i], '->', negative_cycle[(i + 1) % len(negative_cycle)], 'at transformed rate', graph[negative_cycle[i]][negative_cycle[(i + 1) % len(negative_cycle)]]['weight'])
-            print('Total rate:', math.exp(-sum([graph[negative_cycle[i]][negative_cycle[(i + 1) % len(negative_cycle)]]['weight'] for i in range(len(negative_cycle))])))
-    return negative_cycles or 'No arbitrage opportunities found.'
+# reconstruct negative cycles
+
+    for currency in graph:
+        for neighbor in graph[currency]:
+            if distances[currency] + graph[currency][neighbor]['weight'] < distances[neighbor]:
+                print('Negative cycle detected!')
+                
+                # find vertex in cycle
+                visited = dict((cur, False) for cur in graph)
+                visited[neighbor] = True
+                while not visited[currency]:
+                    visited[currency] = True
+                    currency = predecessors[currency]
+
+                # reconstruct cycle
+                #negative_cycle = [currency]
+                negative_cycle = collections.deque([currency])
+                print(negative_cycle)
+                neighbor = predecessors[currency]
+                while currency != neighbor:
+                    #negative_cycle.append(neighbor)
+                    negative_cycle.appendleft(neighbor)
+                    print(negative_cycle)
+                    print(neighbor, predecessors[neighbor])
+                    neighbor = predecessors[neighbor]
+                #negative_cycle = negative_cycle[::-1]
+                print('ARBITRAGE:', negative_cycle)
+
+                for i in range(len(negative_cycle)):
+                    print(negative_cycle[i], '->', negative_cycle[(i + 1) % len(negative_cycle)], 'at transformed rate', graph[negative_cycle[i]][negative_cycle[(i + 1) % len(negative_cycle)]]['weight'])
+                print('Total rate:', math.exp(-sum([graph[negative_cycle[i]][negative_cycle[(i + 1) % len(negative_cycle)]]['weight'] for i in range(len(negative_cycle))])))
+                return negative_cycle
+    return []
+
+def create_arbitrage_path(cycle, base_curr):
+    # need to find best way to go from base_curr to any other currency in cycle
+    # if base_curr is in cycle, return cycle but rotate s.t. base_curr is first
+    if base_curr in cycle:
+        return cycle.rotate(-cycle.index(base_curr))
+    else:
+    # if base_curr is not in cycle, find best way to go from base_curr to cycle
+        for curr in cycle:
+            best = math.inf
+
 
 #print(ccxt.exchanges) 
 print('Sandbox mode:', config.sandbox)
@@ -115,21 +145,19 @@ exchange_class = getattr(ccxt, exchange_id)
 # Instantiate real or test exchange
 
 if config.sandbox:
-    exchange = exchange_class({
-        'apiKey': keys.keyList[exchange_id]['api_test'],
-        'secret': keys.keyList[exchange_id]['secret_test'],
-        'enableRateLimit': True,
-    })
+    exchange = exchange_class(keys.keyDict_sandbox[exchange_id])
+    exchange.enableRateLimit = True
     exchange.set_sandbox_mode(True)
 else:
-    exchange = exchange_class({
-        'apiKey': keys.keyList[exchange_id]['api'],
-        'secret': keys.keyList[exchange_id]['secret'],
-        'enableRateLimit': True,
-    })
+    exchange = exchange_class(keys.KeyDict[exchange_id])
+    exchange.enableRateLimit = True
 
 # Load markets
 markets = exchange.load_markets()
+
+#print(exchange.fetchTradingFees())
+
+#print(markets['ETH/BTC'])
 
 #print(exchange.fetchTickers(['ETH/BTC']))
 #print(exchange.fetchTickers().keys())
@@ -142,6 +170,7 @@ for currency in exchange.currencies.keys():
 
 # Populate initial graph
 tickers = exchange.fetchTickers()
+#print(tickers.keys())
 build_graph(graph, tickers)
 
 #print(graph['BTC']['ETH'])
@@ -161,7 +190,12 @@ print('Balance of', home_currency, ':', home_balance)
 
 
 #print(graph)
-print(find_arbitrage(graph, 'BTC'))
+while True:
+    tickers = exchange.fetchTickers()
+    build_graph(graph, tickers)
+    print(find_arbitrage_cycle(graph, 'BTC')) #Pick arbitrary starting currency
+    time.sleep(0.5)
+
 
 # The arbitrage opportunity is A -> B -> C -> A
 # A -> B at a rate of 1.2 (sell A to buy B)
