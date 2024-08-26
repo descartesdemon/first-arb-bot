@@ -133,6 +133,10 @@ def create_arbitrage_path(cycle, base_curr):
     # if base_curr is not in cycle, find best way to go from base_curr to cycle
         for curr in cycle:
             best = math.inf
+            if base_curr in graph[curr] and curr in graph[base_curr]:
+                # TODO: complete this
+                ...
+    return None
 
 
 #print(ccxt.exchanges) 
@@ -154,14 +158,6 @@ else:
 # Load markets
 markets = exchange.load_markets()
 
-#print(exchange.fetchTradingFees())
-
-#print(markets['ETH/BTC'])
-
-#print(exchange.fetchTickers(['ETH/BTC']))
-#print(exchange.fetchTickers().keys())
-#print(exchange.currencies.keys())
-
 # Initialize graph for bellman-ford
 graph = {}
 for currency in exchange.currencies.keys():
@@ -171,16 +167,6 @@ for currency in exchange.currencies.keys():
 tickers = exchange.fetchTickers()
 #print(tickers.keys())
 build_graph(graph, tickers)
-
-#print(graph['BTC']['ETH'])
-#print(graph['ETH']['BTC'])
-
-#print(graph['BTC']['ETH']['weight'] + graph['ETH']['LTC']['weight'] + graph['LTC']['BTC']['weight'])
-
-#print(markets.keys())
-#print(exchange.markets['ETH/BTC'])
-#print(exchange.fetch_balance()['BTC'])
-#print(exchange.fetch_order_book('ETH/BTC'))
 
 home_currency = config.home_currency
 home_balance = exchange.fetch_balance()[home_currency]
