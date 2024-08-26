@@ -1,4 +1,6 @@
 sandbox = True
-exchange_id = 'binance'
 # Binance and Coinbase are the only exchanges I've made ticker format reading for
+exchange_id = 'binance'
 home_currency = 'BTC'
+# Need to find a better way to get exchange-specific transaction fees; for now just hardcoding it
+fee = 0.01

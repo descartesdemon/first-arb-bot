@@ -5,7 +5,6 @@ import keys
 import time
 import collections
 
-fee = 0.99
 
 test_graph = {
     'A': {
