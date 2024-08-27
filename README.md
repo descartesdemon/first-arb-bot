@@ -15,7 +15,10 @@ r_{AB} * r_{BC} * r_{CA} > 1\\
 Current functionality:
 Scans an exchange with tickers with "AAA/BBB" formatting and detects arbitrage opportunities between input currencies.
 
-TODO:
+## TODO:
+
 Account for transaction fees
+
 Execute trades
+
 Build UI and visuals (probably with Flask)
