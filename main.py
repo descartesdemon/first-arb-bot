@@ -48,6 +48,7 @@ def get_exchange_id():
     return exchange_id
 
 def build_graph_tickers(graph, tickers):
+    '''Deprecated; use build_graph_order_books instead because of rate limiting and lack of support for all exchanges'''
     for pair in tickers:
         ticker = tickers[pair]
         base, quote = pair.split('/')
@@ -71,10 +72,8 @@ def build_graph_tickers(graph, tickers):
             }
 
 def build_graph_order_books(graph, order_books):
-    #print(order_books)
     for order_book in order_books:
         base, quote = order_book['symbol'].split('/')
-        #print('EDGE', base, quote)
         if base not in graph or quote not in graph:
             continue
         # Buyer bids to buy base w/ quote; we sell to buyer base for quote
@@ -120,7 +119,7 @@ def find_arbitrage_cycle(graph, begin):
     for currency in graph:
         for neighbor in graph[currency]:
             if distances[currency] + graph[currency][neighbor]['weight'] < distances[neighbor]:
-                print('Negative cycle detected!')
+                #print('Negative cycle detected!')
                 
                 # find vertex in cycle
                 #visited = dict((cur, False) for cur in graph)
@@ -133,13 +132,13 @@ def find_arbitrage_cycle(graph, begin):
                 # reconstruct cycle
                 #negative_cycle = [currency]
                 negative_cycle = collections.deque([currency])
-                print(negative_cycle)
+                #print(negative_cycle)
                 neighbor = predecessors[currency]
                 while currency != neighbor:
                     #negative_cycle.append(neighbor)
                     negative_cycle.appendleft(neighbor)
-                    print(negative_cycle)
-                    print(neighbor, predecessors[neighbor])
+                    #print(negative_cycle)
+                    #print(neighbor, predecessors[neighbor])
                     neighbor = predecessors[neighbor]
                 #negative_cycle = negative_cycle[::-1]
                 print('ARBITRAGE:', negative_cycle)
@@ -150,19 +149,41 @@ def find_arbitrage_cycle(graph, begin):
                 return negative_cycle
     return []
 
-def create_arbitrage_path(cycle, base_curr):
+def create_arbitrage_path(graph, cycle, base_curr):
     # need to find best way to go from base_curr to any other currency in cycle
     # if base_curr is in cycle, return cycle but rotate s.t. base_curr is first
+    return_cycle = cycle
     if base_curr in cycle:
-        return cycle.rotate(-cycle.index(base_curr))
+        return_cycle.rotate(-cycle.index(base_curr))
+        return_cycle.append(base_curr)
+        return return_cycle
     else:
     # if base_curr is not in cycle, find best way to go from base_curr to cycle
-        for curr in cycle:
-            best = math.inf
-            if base_curr in graph[curr] and curr in graph[base_curr]:
+        best_rate = math.inf
+        best = None
+        for curr in return_cycle:
+            # maybe find a more elegant solution
+            if base_curr in graph[curr] and curr in graph[base_curr]: # check if 2-way path between base and the candidate
                 # TODO: complete this
-                ...
+                if graph[base_curr][curr]['weight'] + graph[curr][base_curr]['weight'] < best_rate:
+                    best_rate = graph[base_curr][curr]['weight']
+                    best = curr
+        if best is not None:
+            return_cycle.rotate(-cycle.index(best))
+            return_cycle.appendleft(base_curr)
+            return_cycle.append(base_curr)
+            return return_cycle
     return None
+
+def execute_arbitrage_path(path):
+    ...
+
+async def fetch_individual_ob(exchange, ticker):
+    return exchange.fetch_order_book(ticker)
+
+async def fetch_order_books_list(exchange, ticker_list):
+    return await asyncio.gather(*[fetch_individual_ob(exchange, ticker) for ticker in ticker_list])
+
 
 async def main():
     #print(ccxt.exchanges) 
@@ -206,77 +227,20 @@ async def main():
                 valid_input = False
         
     # Initialize graph for bellman-ford
-    #graph = {}
-    #for currency in exchange.currencies.keys():
-    #    graph[currency] = {}
     graph = {currency: {} for currency in input_currencies}
 
-
-    ## Populate initial graph using fetchTickers (OLD)
-    #tickers = exchange.fetchTickers()
-    #print(tickers.keys())
-    #build_graph_tickers(graph, tickers)
-
     ## Populate initial graph using fetchOrderBooks
-
-    
-
     ticker_list = exchange.fetchTickers().keys()
     filtered_list = list(filter(lambda t: t.split('/')[0] in input_currencies and t.split('/')[1] in input_currencies, ticker_list))
 
-    print(filtered_list)
+    all_order_books = await fetch_order_books_list(exchange, filtered_list)
 
-    async def fetch_individual_ob(ticker):
-        return exchange.fetch_order_book(ticker)
-    
-    async def fetch_order_books_list(ticker_list):
-        return await asyncio.gather(*[fetch_individual_ob(ticker) for ticker in ticker_list])
-
-    #all_order_books = dict(zip(filtered_list, await asyncio.gather(*[fetch_individual_ob(ticker) for ticker in filtered_list])))
-    #all_order_books = await asyncio.gather(*[fetch_individual_ob(ticker) for ticker in filtered_list])
-
-    all_order_books = await fetch_order_books_list(filtered_list)
-
-    print(all_order_books)
-
-    #build_graph_order_books(graph, all_order_books)
-
-    #print(graph)
     while True:
-        #tickers = exchange.fetchTickers()
-        #build_graph_tickers(graph, tickers)
-        #print(exchange.fetchTickers())
-        #print(all_order_books)
-        all_order_books = await fetch_order_books_list(filtered_list)
+        all_order_books = await fetch_order_books_list(exchange, filtered_list)
         build_graph_order_books(graph, all_order_books)
-        #print(graph)
-        print(find_arbitrage_cycle(graph, 'BTC')) #Pick arbitrary starting currency
+        #print(find_arbitrage_cycle(graph, home_currency)) #Pick arbitrary starting currency
+        print('PATH:', create_arbitrage_path(graph, find_arbitrage_cycle(graph, home_currency), home_currency))
         time.sleep(0.5)
-
-
-    # The arbitrage opportunity is A -> B -> C -> A
-    # A -> B at a rate of 1.2 (sell A to buy B)
-    # B -> C at a rate of 1.1 (sell B to buy C)
-    # C -> A at a rate of 1.1 (sell C to buy A)
-    # The total rate is 1.2 * 1.1 * 1.1 = 1.452, which is greater than 1, so there's an arbitrage opportunity.
-
-
-    ### Pseudocode
-    #while True
-    #    get balance
-    #    get order book
-    #    build graph of exchange rates for bellman ford (how do we account for depth??)
-    #       preliminary graph building algo:
-    #       get best exchange rates between assets
-    #       cap quantity traded by max(available balance, bid/ask quantity)
-    #       rebuild graph (naive approach? maybe just update weights)
-    #       
-    #
-    #
-    #
-    #
-    #
-
 
     input('Press Enter to continue...')
 
