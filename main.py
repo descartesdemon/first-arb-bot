@@ -4,6 +4,7 @@ import config
 import keys
 import time
 import collections
+import asyncio
 
 
 test_graph = {
@@ -46,7 +47,7 @@ def get_exchange_id():
         exchange_id = input('Enter exchange id: ')
     return exchange_id
 
-def build_graph(graph, tickers):
+def build_graph_tickers(graph, tickers):
     for pair in tickers:
         ticker = tickers[pair]
         base, quote = pair.split('/')
@@ -67,6 +68,30 @@ def build_graph(graph, tickers):
                 'weight': -math.log(1/ticker['ask']),
                 'type': 'ask',
                 'quantity': ticker['askVolume'],
+            }
+
+def build_graph_order_books(graph, order_books):
+    #print(order_books)
+    for order_book in order_books:
+        base, quote = order_book['symbol'].split('/')
+        #print('EDGE', base, quote)
+        if base not in graph or quote not in graph:
+            continue
+        # Buyer bids to buy base w/ quote; we sell to buyer base for quote
+        if order_book['bids']:
+            graph[base][quote] = {
+                'rate': order_book['bids'][0][0],
+                'weight': -math.log(order_book['bids'][0][0]), # negative log transform so arbitrage opportunities become detectable negative cycles; r1 * r2 * r3 > 1 implies -log(r1) - log(r2) - log(r3) < 0
+                'type': 'bid',
+                'quantity': order_book['bids'][0][1],
+            }
+        # Seller asks to sell base for quote; we buy base using our quote
+        if order_book['asks']:
+            graph[quote][base] = {
+                'rate': order_book['asks'][0][0],
+                'weight': -math.log(1/order_book['asks'][0][0]),
+                'type': 'ask',
+                'quantity': order_book['asks'][0][1],
             }
 
 def find_arbitrage_cycle(graph, begin):
@@ -98,7 +123,8 @@ def find_arbitrage_cycle(graph, begin):
                 print('Negative cycle detected!')
                 
                 # find vertex in cycle
-                visited = dict((cur, False) for cur in graph)
+                #visited = dict((cur, False) for cur in graph)
+                visited = dict.fromkeys(graph, False)
                 visited[neighbor] = True
                 while not visited[currency]:
                     visited[currency] = True
@@ -138,72 +164,120 @@ def create_arbitrage_path(cycle, base_curr):
                 ...
     return None
 
+async def main():
+    #print(ccxt.exchanges) 
+    print('Sandbox mode:', config.sandbox)
 
-#print(ccxt.exchanges) 
-print('Sandbox mode:', config.sandbox)
+    exchange_id = config.exchange_id
+    exchange_class = getattr(ccxt, exchange_id)
 
-exchange_id = config.exchange_id
-exchange_class = getattr(ccxt, exchange_id)
+    # Instantiate real or test exchange
 
-# Instantiate real or test exchange
+    if config.sandbox:
+        exchange = exchange_class(keys.keyDict_sandbox[exchange_id])
+        exchange.enableRateLimit = True
+        exchange.set_sandbox_mode(True)
+    else:
+        exchange = exchange_class(keys.KeyDict[exchange_id])
+        exchange.enableRateLimit = True
 
-if config.sandbox:
-    exchange = exchange_class(keys.keyDict_sandbox[exchange_id])
-    exchange.enableRateLimit = True
-    exchange.set_sandbox_mode(True)
-else:
-    exchange = exchange_class(keys.KeyDict[exchange_id])
-    exchange.enableRateLimit = True
-
-# Load markets
-markets = exchange.load_markets()
-
-# Initialize graph for bellman-ford
-graph = {}
-for currency in exchange.currencies.keys():
-    graph[currency] = {}
-
-# Populate initial graph
-tickers = exchange.fetchTickers()
-#print(tickers.keys())
-build_graph(graph, tickers)
-
-home_currency = config.home_currency
-home_balance = exchange.fetch_balance()[home_currency]
-
-print('Balance of', home_currency, ':', home_balance)
+    # Load markets
+    markets = exchange.load_markets()
 
 
-#print(graph)
-while True:
-    tickers = exchange.fetchTickers()
-    build_graph(graph, tickers)
-    print(find_arbitrage_cycle(graph, 'BTC')) #Pick arbitrary starting currency
-    time.sleep(0.5)
+    home_currency = config.home_currency
+    home_balance = exchange.fetch_balance()[home_currency]
+
+    print('Balance of', home_currency, ':', home_balance)
+
+    valid_input = False
+    valid_currencies = exchange.currencies.keys()
+
+    print('Valid currencies:', *valid_currencies)
+
+    while not valid_input:
+        input_currencies_string = input('Enter comma-separated list of currencies to track: ')
+        input_currencies = input_currencies_string.split(',')
+        input_currencies = [currency.strip() for currency in input_currencies]
+        valid_input = True
+        for currency in input_currencies:
+            if currency not in valid_currencies:
+                print('Invalid currency: ' + currency + '!')
+                valid_input = False
+        
+    # Initialize graph for bellman-ford
+    #graph = {}
+    #for currency in exchange.currencies.keys():
+    #    graph[currency] = {}
+    graph = {currency: {} for currency in input_currencies}
 
 
-# The arbitrage opportunity is A -> B -> C -> A
-# A -> B at a rate of 1.2 (sell A to buy B)
-# B -> C at a rate of 1.1 (sell B to buy C)
-# C -> A at a rate of 1.1 (sell C to buy A)
-# The total rate is 1.2 * 1.1 * 1.1 = 1.452, which is greater than 1, so there's an arbitrage opportunity.
+    ## Populate initial graph using fetchTickers (OLD)
+    #tickers = exchange.fetchTickers()
+    #print(tickers.keys())
+    #build_graph_tickers(graph, tickers)
+
+    ## Populate initial graph using fetchOrderBooks
+
+    
+
+    ticker_list = exchange.fetchTickers().keys()
+    filtered_list = list(filter(lambda t: t.split('/')[0] in input_currencies and t.split('/')[1] in input_currencies, ticker_list))
+
+    print(filtered_list)
+
+    async def fetch_individual_ob(ticker):
+        return exchange.fetch_order_book(ticker)
+    
+    async def fetch_order_books_list(ticker_list):
+        return await asyncio.gather(*[fetch_individual_ob(ticker) for ticker in ticker_list])
+
+    #all_order_books = dict(zip(filtered_list, await asyncio.gather(*[fetch_individual_ob(ticker) for ticker in filtered_list])))
+    #all_order_books = await asyncio.gather(*[fetch_individual_ob(ticker) for ticker in filtered_list])
+
+    all_order_books = await fetch_order_books_list(filtered_list)
+
+    print(all_order_books)
+
+    #build_graph_order_books(graph, all_order_books)
+
+    #print(graph)
+    while True:
+        #tickers = exchange.fetchTickers()
+        #build_graph_tickers(graph, tickers)
+        #print(exchange.fetchTickers())
+        #print(all_order_books)
+        all_order_books = await fetch_order_books_list(filtered_list)
+        build_graph_order_books(graph, all_order_books)
+        #print(graph)
+        print(find_arbitrage_cycle(graph, 'BTC')) #Pick arbitrary starting currency
+        time.sleep(0.5)
 
 
-### Pseudocode
-#while True
-#    get balance
-#    get order book
-#    build graph of exchange rates for bellman ford (how do we account for depth??)
-#       preliminary graph building algo:
-#       get best exchange rates between assets
-#       cap quantity traded by max(available balance, bid/ask quantity)
-#       rebuild graph (naive approach? maybe just update weights)
-#       
-#
-#
-#
-#
-#
+    # The arbitrage opportunity is A -> B -> C -> A
+    # A -> B at a rate of 1.2 (sell A to buy B)
+    # B -> C at a rate of 1.1 (sell B to buy C)
+    # C -> A at a rate of 1.1 (sell C to buy A)
+    # The total rate is 1.2 * 1.1 * 1.1 = 1.452, which is greater than 1, so there's an arbitrage opportunity.
 
 
-input('Press Enter to continue...')
+    ### Pseudocode
+    #while True
+    #    get balance
+    #    get order book
+    #    build graph of exchange rates for bellman ford (how do we account for depth??)
+    #       preliminary graph building algo:
+    #       get best exchange rates between assets
+    #       cap quantity traded by max(available balance, bid/ask quantity)
+    #       rebuild graph (naive approach? maybe just update weights)
+    #       
+    #
+    #
+    #
+    #
+    #
+
+
+    input('Press Enter to continue...')
+
+asyncio.run(main())
