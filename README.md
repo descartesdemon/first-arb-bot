@@ -11,3 +11,11 @@ r_{AB} * r_{BC} * r_{CA} > 1\\
 \log(r_{AB}) + \log(r_{BC}) + \log(r_{CA}) > 0\\
 -\log(r_{AB}) - \log(r_{BC}) - \log(r_{CA}) < 0\\
 \end{gather*}$$
+
+Current functionality:
+Scans an exchange with tickers with "AAA/BBB" formatting and detects arbitrage opportunities between input currencies.
+
+TODO:
+Account for transaction fees
+Execute trades
+Build UI and visuals (probably with Flask)
