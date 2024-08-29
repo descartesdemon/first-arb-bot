@@ -6,6 +6,9 @@ import time
 import collections
 import asyncio
 
+fee_bid = 1 - config.fee
+fee_ask = 1 + config.fee
+loop_time = config.loop_time
 
 test_graph = {
     'A': {
@@ -57,16 +60,16 @@ def build_graph_tickers(graph, tickers):
         # Buyer bids to buy base w/ quote; we sell to buyer base for quote
         if ticker['bid']:
             graph[base][quote] = {
-                'rate': ticker['bid'],
-                'weight': -math.log(ticker['bid']), # negative log transform so arbitrage opportunities become detectable negative cycles; r1 * r2 * r3 > 1 implies -log(r1) - log(r2) - log(r3) < 0
+                'rate': ticker['bid'] * fee_bid,
+                'weight': -math.log(ticker['bid'] * fee_bid), # negative log transform so arbitrage opportunities become detectable negative cycles; r1 * r2 * r3 > 1 implies -log(r1) - log(r2) - log(r3) < 0
                 'type': 'bid',
                 'quantity': ticker['bidVolume'],
             }
         # Seller asks to sell base for quote; we buy base using our quote
         if ticker['ask']:
             graph[quote][base] = {
-                'rate': ticker['ask'],
-                'weight': -math.log(1/ticker['ask']),
+                'rate': ticker['ask'] * fee_ask,
+                'weight': -math.log(1/(ticker['ask'] * fee_ask)),
                 'type': 'ask',
                 'quantity': ticker['askVolume'],
             }
@@ -79,16 +82,16 @@ def build_graph_order_books(graph, order_books):
         # Buyer bids to buy base w/ quote; we sell to buyer base for quote
         if order_book['bids']:
             graph[base][quote] = {
-                'rate': order_book['bids'][0][0],
-                'weight': -math.log(order_book['bids'][0][0]), # negative log transform so arbitrage opportunities become detectable negative cycles; r1 * r2 * r3 > 1 implies -log(r1) - log(r2) - log(r3) < 0
+                'rate': order_book['bids'][0][0] * fee_bid,
+                'weight': -math.log(order_book['bids'][0][0] * fee_bid), # negative log transform so arbitrage opportunities become detectable negative cycles; r1 * r2 * r3 > 1 implies -log(r1) - log(r2) - log(r3) < 0
                 'type': 'bid',
                 'quantity': order_book['bids'][0][1],
             }
         # Seller asks to sell base for quote; we buy base using our quote
         if order_book['asks']:
             graph[quote][base] = {
-                'rate': order_book['asks'][0][0],
-                'weight': -math.log(1/order_book['asks'][0][0]),
+                'rate': order_book['asks'][0][0] * fee_ask,
+                'weight': -math.log(1/(order_book['asks'][0][0] * fee_ask)),
                 'type': 'ask',
                 'quantity': order_book['asks'][0][1],
             }
@@ -240,7 +243,7 @@ async def main():
         build_graph_order_books(graph, all_order_books)
         #print(find_arbitrage_cycle(graph, home_currency)) #Pick arbitrary starting currency
         print('PATH:', create_arbitrage_path(graph, find_arbitrage_cycle(graph, home_currency), home_currency))
-        time.sleep(0.5)
+        time.sleep(config.loop_time)
 
     input('Press Enter to continue...')
 
